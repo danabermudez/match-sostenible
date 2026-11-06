@@ -144,6 +144,7 @@ input:focus-visible{outline:3px solid var(--verde);outline-offset:1px}
 .defi{min-height:40px;font-size:.84rem;color:var(--muted);line-height:1.35}
 .aviso{background:color-mix(in srgb,var(--amarillo) 22%,var(--surface));border:2px solid var(--amarillo);
   border-radius:14px;padding:10px 12px;font-size:.82rem;font-weight:600}
+.aviso.ok{background:none;border:0;padding:2px 0;color:var(--muted);font-weight:600;font-size:.8rem}
 
 /* ---- ranking ---- */
 table{width:100%;border-collapse:collapse;font-size:.88rem}
@@ -166,6 +167,15 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:800}
   border-radius:16px;padding:11px 13px;font-weight:700;font-size:.9rem;margin:0}
 @keyframes brinca{0%,100%{transform:translateY(0)}30%{transform:translateY(-9px)}60%{transform:translateY(-3px)}}
 .mascota.salta img{animation:brinca .55s ease}
+/* ---- instrucciones ---- */
+.como summary{display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;list-style:none}
+.como summary::-webkit-details-marker{display:none}
+.como summary:focus-visible{outline:3px solid var(--morado);outline-offset:4px;border-radius:8px}
+.como .flecha{color:var(--muted);font-size:1.1rem;transition:transform .2s}
+.como[open] .flecha{transform:rotate(180deg)}
+.pasos{margin:12px 0 10px;padding-left:22px;display:flex;flex-direction:column;gap:9px;font-size:.88rem}
+.pasos li{padding-left:2px}
+.pasos li::marker{color:var(--verde-d);font-weight:800}
 /* ---- valoración ---- */
 .estrellas{display:flex;gap:6px;justify-content:center}
 .estrella{border:0;background:none;cursor:pointer;font-size:2rem;line-height:1;padding:2px;
@@ -233,6 +243,18 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:800}
           <span>Racha mejor: <b class="tnum" id="miCombo">0</b></span>
         </div>
       </div>
+
+      <details class="card como" id="comoJugar">
+        <summary><h2>¿Cómo se juega?</h2><span class="flecha" aria-hidden="true">▾</span></summary>
+        <ol class="pasos">
+          <li><b>Empareja cada concepto con su definición.</b> Toca el concepto de la izquierda y luego su definición a la derecha. En computadora puedes usar los números del teclado.</li>
+          <li><b>Si aciertas</b> ganas puntos y el reloj te devuelve segundo y medio. Encadenar aciertos multiplica los puntos hasta por cinco, y abajo aparece la definición completa.</li>
+          <li><b>Si fallas</b> pierdes tres segundos y ese concepto vuelve a salirte más adelante, hasta que te lo aprendas.</li>
+          <li><b>Al limpiar el tablero</b> ganas un bono y empieza otra ronda, con más tarjetas que la anterior.</li>
+          <li><b>La partida termina</b> cuando el reloj llega a cero. Tus puntos se suman como XP y van subiendo tu nivel, de Semilla hasta Guardiana del planeta.</li>
+        </ol>
+        <p class="small muted" style="margin:0">Dura lo que aguantes: entre uno y tres minutos. Juega varias veces, que es como se fija el glosario.</p>
+      </details>
 
       <div class="card" style="display:flex;flex-direction:column;gap:12px">
         <h2>Elige el repaso</h2>
@@ -385,8 +407,12 @@ const nombreNivel = xp => NIVELES[nivelDe(xp)-1];
 const progresoNivel = xp => nivelDe(xp)>=NIVELES.length ? 100 : Math.round((xp%XP_NIVEL)/XP_NIVEL*100);
 
 /* ---------- almacenamiento ---------- */
+/* Pega aquí la dirección de tu Web App de Google Apps Script para activar
+   el ranking compartido del salón. Si queda vacía, el juego guarda solo en el dispositivo. */
+const RANKING_URL = "https://script.google.com/macros/s/AKfycbx2kugszqR1ZousUgfwCrIjj__MzUkqQZhJy6ekbHmAXwNnwoDDSmbF1W6mOi2zuKD1WQ/exec";
+
 const LS = "match-sostenible-v1";
-let db = null, puedeEscribir = false, jugadores = {}, valoraciones = {}, estrellasElegidas = 0;
+let db = null, puedeEscribir = false, nube = false, jugadores = {}, valoraciones = {}, estrellasElegidas = 0;
 
 function leerLocal(){ try{ return JSON.parse(localStorage.getItem(LS)||"{}"); }catch{ return {}; } }
 function guardarLocal(o){ try{ localStorage.setItem(LS, JSON.stringify(o)); }catch{} }
@@ -399,11 +425,35 @@ function fusionar(a,b){
     historial:((a.historial||[]).length>=(b.historial||[]).length?a.historial:b.historial)||[] };
 }
 
+/* ---- ranking compartido en una hoja de Google ---- */
+async function leerNube(){
+  const r = await fetch(RANKING_URL + "?t=" + Date.now());
+  if(!r.ok) throw new Error("respuesta " + r.status);
+  const d = await r.json();
+  (d.jugadores || []).forEach(j => { if(j.id) jugadores[j.id] = fusionar(j, jugadores[j.id]); });
+  (d.valoraciones || []).forEach(v => { if(v.id) valoraciones[v.id] = v; });
+}
+
+async function escribirNube(tipo, datos){
+  /* text/plain evita la petición previa de CORS que Apps Script no responde */
+  return fetch(RANKING_URL, { method:"POST", headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body: JSON.stringify({ tipo, ...datos }) });
+}
+
 async function iniciarAlmacen(){
   const local = leerLocal();
   jugadores = local.jugadores || {};
+  if(RANKING_URL){
+    try {
+      await leerNube();
+      nube = true;
+      marcarModo("nube");
+      pintarTodo();
+      return;
+    } catch(e){ marcarModo(almacenFunciona() ? "local" : "bloqueado"); }
+  }
   try { db = await claude.use("db"); } catch { db = null; }
-  if(!db){ marcarModo("local"); return; }
+  if(!db){ marcarModo(almacenFunciona() ? "local" : "bloqueado"); return; }
   try {
     const snap = await db.collection("jugadores").get();
     snap.docs.forEach(d => { jugadores[d.id] = fusionar(d.data(), jugadores[d.id]); });
@@ -413,25 +463,55 @@ async function iniciarAlmacen(){
     } catch(e){}
     puedeEscribir = true;
     marcarModo("nube");
-  } catch(e){ marcarModo("local"); }
+  } catch(e){ marcarModo(almacenFunciona() ? "local" : "bloqueado"); }
   pintarTodo();
+}
+
+/* ¿el navegador deja guardar? en ventana privada o con datos bloqueados, no */
+function almacenFunciona(){
+  try {
+    localStorage.setItem("prueba-ms","1");
+    const ok = localStorage.getItem("prueba-ms") === "1";
+    localStorage.removeItem("prueba-ms");
+    return ok;
+  } catch(e){ return false; }
 }
 
 function marcarModo(m){
   const av = $("#aviso");
-  if(m==="local"){
-    av.hidden = false;
-    av.textContent = "Progreso guardado solo en este dispositivo: el ranking compartido necesita abrir el enlace con sesión de Claude iniciada y permiso de edición.";
-  } else { av.hidden = true; }
+  av.hidden = false;
+  if(m === "bloqueado"){
+    av.className = "aviso";
+    av.textContent = "Tu navegador está bloqueando el guardado, así que los puntos se perderán al cerrar. " +
+      "Suele pasar en ventanas privadas o de incógnito: ábrelo en una ventana normal.";
+  } else if(m === "nube"){
+    av.className = "aviso ok";
+    av.textContent = "Conectado al ranking del salón: tus puntos se suman a la tabla de todos.";
+  } else if(m === "sinconexion"){
+    av.className = "aviso";
+    av.textContent = "No se pudo enviar tu puntaje al ranking del salón. Quedó guardado aquí; " +
+      "vuelve a jugar con internet y se enviará.";
+  } else {
+    av.className = "aviso ok";
+    av.textContent = "Tu progreso se guarda en este dispositivo: puedes cerrar y seguir después.";
+  }
 }
 
 async function guardarJugador(id){
   const j = jugadores[id];
   const local = leerLocal(); local.jugadores = local.jugadores || {};
   local.jugadores[id] = j; local.ultimo = id; guardarLocal(local);
+  /* comprobamos que de verdad quedó escrito, no solo que no dio error */
+  const guardado = (leerLocal().jugadores || {})[id];
+  if(!guardado || guardado.xp !== j.xp) marcarModo(nube ? "nube" : "bloqueado");
+  if(nube){
+    try { await escribirNube("jugador", {id, ...j, historial: undefined}); await leerNube(); pintarTop(); }
+    catch(e){ marcarModo("sinconexion"); }
+    return;
+  }
   if(!db || !puedeEscribir) return;
   try { await db.doc("jugadores/"+id).set(j); }
-  catch(e){ puedeEscribir = false; marcarModo("local"); }
+  catch(e){ puedeEscribir = false; marcarModo(almacenFunciona() ? "local" : "bloqueado"); }
 }
 
 async function guardarValoracion(){
@@ -441,6 +521,10 @@ async function guardarValoracion(){
   valoraciones[yoId] = v;
   const local = leerLocal(); local.valoraciones = valoraciones; guardarLocal(local);
   $("#gracias").hidden = false;
+  if(nube){
+    try { await escribirNube("valoracion", {id: yoId, ...v}); } catch(e){}
+    return;
+  }
   if(!db || !puedeEscribir) return;
   try { await db.doc("valoraciones/" + yoId).set(v); } catch(e){}
 }
@@ -541,6 +625,7 @@ function pintarTodo(){
     $("#miMejor").textContent = j.mejor;
     $("#miPartidas").textContent = j.partidas;
     $("#miCombo").textContent = j.racha;
+    $("#comoJugar").open = !j.partidas;   /* abiertas la primera vez, luego plegadas */
     setAra("#araInicio", j.partidas ? "animo" : "hola");
     $("#araFrase").textContent = j.partidas ? alAzar(FRASES_VUELTA) : alAzar(FRASES);
   } else {
@@ -892,7 +977,10 @@ $("#btnProfeSalir").addEventListener("click", () => { mostrar("pInicio"); });
 $("#btnClave").addEventListener("click", () => {
   const ok = $("#claveProfe").value.trim().toUpperCase() === CLAVE_PROFE;
   $("#claveMal").hidden = ok;
-  if(ok){ $("#profeGate").hidden = true; $("#profeTabla").hidden = false; pintarProfe(); }
+  if(ok){
+    $("#profeGate").hidden = true; $("#profeTabla").hidden = false; pintarProfe();
+    if(nube) leerNube().then(pintarProfe).catch(() => {});
+  }
 });
 $("#claveProfe").addEventListener("keydown", e => { if(e.key === "Enter") $("#btnClave").click(); });
 document.addEventListener("keydown", e => {
@@ -908,6 +996,7 @@ document.addEventListener("keydown", e => {
   jugadores = local.jugadores || {};
   valoraciones = local.valoraciones || {};
   if(local.ultimo) yoId = local.ultimo;
+  marcarModo(almacenFunciona() ? "local" : "bloqueado");
   pintarTodo();
   iniciarAlmacen();
 })();
