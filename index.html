@@ -97,6 +97,7 @@ button{font:inherit;color:inherit}
 .name:hover{border-color:var(--verde)}
 .name .lv{font-size:.72rem;color:var(--muted);font-weight:800;white-space:nowrap}
 .name.profe{border-color:var(--morado)}
+.name.invitado{border-style:dashed;border-color:var(--azul);justify-content:center;color:var(--azul-d);font-weight:800}
 input[type=text],input[type=search]{width:100%;background:var(--surface);color:var(--fg);
   border:2px solid var(--line);border-radius:14px;padding:12px 14px;font:inherit;font-weight:600}
 input:focus-visible{outline:3px solid var(--verde);outline-offset:1px}
@@ -209,6 +210,10 @@ td.n{text-align:right;font-variant-numeric:tabular-nums;font-weight:800}
       <h2>¿Quién juega?</h2>
       <input type="search" id="buscar" placeholder="Busca tu nombre…" autocomplete="off">
       <div class="names" id="listaNombres"></div>
+      <div id="invitadoBox" hidden style="display:flex;gap:8px;flex-wrap:wrap">
+        <input type="text" id="nombreInvitado" placeholder="Escribe tu nombre" maxlength="28" style="flex:1 1 150px">
+        <button class="btn" id="btnInvitado">Entrar</button>
+      </div>
     </div>
 
     <div id="panelJugador" hidden style="display:flex;flex-direction:column;gap:16px">
@@ -479,16 +484,41 @@ function mostrar(id){
 function pintarNombres(filtro=""){
   const f = filtro.toLowerCase().trim();
   const cont = $("#listaNombres"); cont.textContent = "";
-  ROSTER.filter(r => r.nombre.toLowerCase().includes(f)).forEach(r => {
-    const id = slug(r.nombre), j = jugadores[id];
+  const ficha = (id, nombre, clase) => {
+    const j = jugadores[id];
     const b = document.createElement("button");
-    b.className = "name" + (r.rol ? " profe" : "");
+    b.className = "name" + clase;
     b.innerHTML = "<span></span><span class='lv'></span>";
-    b.firstChild.textContent = r.nombre;
+    b.firstChild.textContent = nombre;
     b.lastChild.textContent = j ? "Nv " + nivelDe(j.xp) : "nuevo";
-    b.addEventListener("click", () => { elegirJugador(id, r.nombre); });
+    b.addEventListener("click", () => elegirJugador(id, nombre));
     cont.appendChild(b);
+  };
+  ROSTER.filter(r => r.nombre.toLowerCase().includes(f))
+        .forEach(r => ficha(slug(r.nombre), r.nombre, r.rol ? " profe" : ""));
+  /* invitados que ya jugaron en este dispositivo, para que puedan volver a su progreso */
+  Object.keys(jugadores).filter(id => id.startsWith("inv-"))
+        .filter(id => jugadores[id].nombre.toLowerCase().includes(f))
+        .forEach(id => ficha(id, jugadores[id].nombre, " invitado"));
+  const nuevo = document.createElement("button");
+  nuevo.className = "name invitado";
+  nuevo.textContent = "+ Entrar como invitado";
+  nuevo.addEventListener("click", () => {
+    $("#invitadoBox").hidden = false;
+    const i = $("#nombreInvitado");
+    if(!i.value) i.value = $("#buscar").value.trim();
+    i.focus();
   });
+  cont.appendChild(nuevo);
+}
+
+function entrarInvitado(){
+  const nombre = ($("#nombreInvitado").value.trim() || "Invitado").slice(0,28);
+  let id = "inv-" + (slug(nombre) || "sin-nombre");
+  if(ROSTER.some(r => slug(r.nombre) === id.slice(4))) id += "-2";
+  $("#invitadoBox").hidden = true;
+  $("#nombreInvitado").value = "";
+  elegirJugador(id, nombre);
 }
 
 function elegirJugador(id, nombre){
@@ -799,6 +829,8 @@ function pintarProfe(){
   });
   t.appendChild(head);
   const lista = ROSTER.map(r => ({nombre:r.nombre, ...(jugadores[slug(r.nombre)] || jugadorBase(r.nombre))}))
+    .concat(Object.keys(jugadores).filter(id => id.startsWith("inv-"))
+      .map(id => ({...jugadores[id], nombre: jugadores[id].nombre + " (invitado)"})))
     .sort((a,b) => b.xp - a.xp);
   lista.forEach((j,i) => {
     const tr = document.createElement("tr");
@@ -835,6 +867,8 @@ function pintarProfe(){
 
 /* ---------- eventos ---------- */
 $("#buscar").addEventListener("input", e => pintarNombres(e.target.value));
+$("#btnInvitado").addEventListener("click", entrarInvitado);
+$("#nombreInvitado").addEventListener("keydown", e => { if(e.key === "Enter") entrarInvitado(); });
 $("#btnJugar").addEventListener("click", empezar);
 $("#btnSalir").addEventListener("click", terminar);
 $("#btnOtra").addEventListener("click", empezar);
